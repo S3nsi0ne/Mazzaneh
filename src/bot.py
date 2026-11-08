@@ -50,9 +50,13 @@ def get_price_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-async def update_channel_board():
+async def update_channel_board(force_new: bool = False):
     """دریافت قیمت جدید و بروزرسانی پیام سنجاق‌شده در کانال"""
     global live_message_id, last_sent_text
+
+    if force_new:
+        live_message_id = None
+        last_sent_text = ""
 
     data = await fetch_prices()
     if not data:
@@ -66,7 +70,7 @@ async def update_channel_board():
 
     try:
         if live_message_id is None:
-            msg = await bot.send_message(chat_id=CHANNEL_ID, text=new_text)
+            msg = await bot.send_message(chat_id=CHANNEL_ID, text=new_text, reply_markup=get_price_keyboard())
             live_message_id = msg.message_id
             try:
                 await bot.pin_chat_message(
@@ -81,13 +85,21 @@ async def update_channel_board():
             await bot.edit_message_text(
                 chat_id=CHANNEL_ID,
                 message_id=live_message_id,
-                text=new_text
+                text=new_text,
+                reply_markup=get_price_keyboard()
             )
             logging.info("🔄 تابلو زنده کانال بروزرسانی شد.")
 
         last_sent_text = new_text
     except Exception as e:
-        logging.error(f"❌ خطا در ارسال/ویرایش پیام کانال: {e}")
+        error_msg = str(e).lower()
+        if "message to edit not found" in error_msg or "message_id_invalid" in error_msg:
+            logging.warning("⚠️ پیام قبلی در کانال پیدا نشد (پاک شده است). در حال ارسال پیام جدید...")
+            live_message_id = None
+            last_sent_text = ""
+            await update_channel_board(force_new=True)
+        else:
+            logging.error(f"❌ خطا در ارسال/ویرایش پیام کانال: {e}")
 
 
 @dp.message(Command("start"))
@@ -95,8 +107,9 @@ async def cmd_start(message: Message):
     await message.answer(
         "سلام! به بات <b>مظنه | نبض بازار</b> خوش آمدید 📊\n\n"
         "🔹 <b>دستورات کاربردی:</b>\n"
-        "• /price — دریافت تابلو لحظه‌ای ارز، طلا و حباب سکه + نمودارها\n"
-        "• /gold <code>[وزن] [درصد اجرت]</code> — ماشین‌حساب خرید طلا (مثال: <code>/gold 4.5 12</code>)\n\n"
+        "• /price — دریافت تابلو لحظه‌ای ارز، طلا و حباب سکه\n"
+        "• /gold <code>[وزن] [درصد اجرت]</code> — ماشین‌حساب خرید طلا (مثال: <code>/gold 4.5 14</code>)\n"
+        "• /repost — ارسال و پین مجدد تابلو در کانال\n\n"
         "💡 <i>همچنین می‌توانید در هر چتی آیدی بات را به همراه یک عدد تایپ کنید تا معادل تومانی آن را لحظه‌ای حساب کند!</i>"
     )
 
@@ -110,6 +123,12 @@ async def cmd_price(message: Message):
         await wait_msg.edit_text(text, reply_markup=get_price_keyboard())
     else:
         await wait_msg.edit_text("❌ خطا در دریافت اطلاعات از سرور.")
+
+
+@dp.message(Command("repost"))
+async def cmd_repost(message: Message):
+    await update_channel_board(force_new=True)
+    await message.answer("✅ تابلو جدید مجدداً در کانال ارسال و سنجاق شد!")
 
 
 @dp.message(Command("gold"))
@@ -172,7 +191,6 @@ async def cb_send_chart(callback: CallbackQuery):
         return
     title, url = chart_info
     await callback.answer("در حال دریافت نمودار...")
-    # اضافه کردن timestamp برای جلوگیری از کش شدن عکس قدیمی توسط تلگرام
     fresh_url = f"{url}?t={int(time.time())}"
     await callback.message.answer_photo(photo=fresh_url, caption=f"📊 <b>{title}</b>\n📢 {CHANNEL_ID}")
 
