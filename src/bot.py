@@ -106,13 +106,29 @@ async def update_channel_board(force_new: bool = False):
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
+    args = message.text.split()
+
+    # اگر کاربر از طریق دکمه‌های چارت وارد پی‌وی شده باشد
+    if len(args) > 1 and args[1].startswith("chart_"):
+        chart_key = args[1]
+        chart_info = CHARTS.get(chart_key)
+        if chart_info:
+            title, url = chart_info
+            fresh_url = f"{url}?t={int(time.time())}"
+            await message.answer_photo(
+                photo=fresh_url,
+                caption=f"📊 <b>{title}</b>\n\n✅ نمودار درخواستی شما تقدیم به شما.\n📢 {CHANNEL_ID}"
+            )
+            return
+
+    # حالت عادی دستور استارت
     await message.answer(
         "سلام! به بات <b>مظنه | نبض بازار</b> خوش آمدید 📊\n\n"
         "🔹 <b>دستورات کاربردی:</b>\n"
         "• /price — دریافت تابلو لحظه‌ای ارز، طلا و حباب سکه\n"
-        "• /gold <code>[وزن] [درصد اجرت]</code> — ماشین‌حساب خرید طلا (مثال: <code>/gold 4.5 14</code>)\n"
+        "• /gold <code>[وزن] [درصد اجرت]</code> — ماشین‌حساب خرید طلا\n"
         "• /repost — ارسال و پین مجدد تابلو در کانال\n\n"
-        "💡 <i>همچنین می‌توانید در هر چتی آیدی بات را به همراه یک عدد تایپ کنید تا معادل تومانی آن را لحظه‌ای حساب کند!</i>"
+        "💡 <i>برای دریافت چارت‌ها، کافی است از داخل کانال روی دکمه‌های مربوطه کلیک کنید!</i>"
     )
 
 
