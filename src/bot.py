@@ -35,7 +35,7 @@ CHARTS = {
 
 def get_price_keyboard() -> InlineKeyboardMarkup:
     """ساخت دکمه‌های شیشه‌ای زیر پیام قیمت با لینک مستقیم به پی‌وی بات"""
-    bot_username = "MazzannehBot"  # <--- نام کاربری بات خود را اینجا بگذارید (بدون @)
+    bot_username = "MazzanehBot"  # <--- نام کاربری بات خود را اینجا جایگزین کنید (بدون @)
 
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -106,27 +106,28 @@ async def update_channel_board(force_new: bool = False):
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
-    args = message.text.split()
+    # تفکیک دقیق پارامترهای ارسالی به همراه دستور استارت
+    text_parts = message.text.split(maxsplit=1)
 
-    # اگر کاربر از طریق دکمه‌های چارت وارد پی‌وی شده باشد
-    if len(args) > 1 and args[1].startswith("chart_"):
-        chart_key = args[1]
-        chart_info = CHARTS.get(chart_key)
-        if chart_info:
-            title, url = chart_info
-            fresh_url = f"{url}?t={int(time.time())}"
-            await message.answer_photo(
-                photo=fresh_url,
-                caption=f"📊 <b>{title}</b>\n\n✅ نمودار درخواستی شما تقدیم به شما.\n📢 {CHANNEL_ID}"
-            )
-            return
+    if len(text_parts) > 1:
+        param = text_parts[1].strip()
+        if param.startswith("chart_"):
+            chart_info = CHARTS.get(param)
+            if chart_info:
+                title, url = chart_info
+                fresh_url = f"{url}?t={int(time.time())}"
+                await message.answer_photo(
+                    photo=fresh_url,
+                    caption=f"📊 <b>{title}</b>\n\n✅ نمودار درخواستی شما تقدیم به شما.\n📢 {CHANNEL_ID}"
+                )
+                return
 
     # حالت عادی دستور استارت
     await message.answer(
         "سلام! به بات <b>مظنه | نبض بازار</b> خوش آمدید 📊\n\n"
         "🔹 <b>دستورات کاربردی:</b>\n"
         "• /price — دریافت تابلو لحظه‌ای ارز، طلا و حباب سکه\n"
-        "• /gold <code>[وزن] [درصد اجرت]</code> — ماشین‌حساب خرید طلا\n"
+        "• /gold <code>[وزن] [درصد اجرت]</code> — ماشین‌حساب خرید طلا (مثال: <code>/gold 4.5 14</code>)\n"
         "• /repost — ارسال و پین مجدد تابلو در کانال\n\n"
         "💡 <i>برای دریافت چارت‌ها، کافی است از داخل کانال روی دکمه‌های مربوطه کلیک کنید!</i>"
     )
@@ -202,31 +203,6 @@ async def cb_refresh_price(callback: CallbackQuery):
         await callback.answer("قیمت‌ها تغییری نکرده است ✅")
 
 
-@dp.callback_query(F.data.startswith("chart_"))
-async def cb_send_chart(callback: CallbackQuery):
-    chart_info = CHARTS.get(callback.data)
-    if not chart_info:
-        return
-    title, url = chart_info
-
-    # ارسال به پی‌وی کاربر
-    user_id = callback.from_user.id
-    fresh_url = f"{url}?t={int(time.time())}"
-
-    try:
-        await bot.send_photo(
-            chat_id=user_id,
-            photo=fresh_url,
-            caption=f"📊 <b>{title}</b>\n\n✅ نمودار درخواستی شما تقدیم به شما."
-        )
-        await callback.answer("✅ نمودار به پی‌وی شما ارسال شد!", show_alert=False)
-    except Exception:
-        # اگر کاربر هنوز استارت را نزد یا ربات را بلاک کرده بود
-        await callback.answer(
-            "❌ لطفاً ابتدا در پی‌وی به بات دستور /start را بفرستید تا بتوانیم نمودار را برایتان ارسال کنیم.",
-            show_alert=True)
-
-
 @dp.inline_query()
 async def inline_calculator(query: InlineQuery):
     """ماشین حساب سریع در حالت اینلاین"""
@@ -258,70 +234,4 @@ async def inline_calculator(query: InlineQuery):
             title=f"💶 {amount:g} یورو = {format_price(eur_total)} تومان",
             description=f"نرخ واحد: {format_price(data.get('eur', 0))} تومان",
             input_message_content=InputTextMessageContent(
-                message_text=f"💶 <b>{amount:g} یورو:</b> <code>{format_price(eur_total)}</code> تومان\n(نرخ واحد: {format_price(data.get('eur', 0))} تومان)\n📢 {CHANNEL_ID}"
-            )
-        ),
-        InlineQueryResultArticle(
-            id="gold_calc",
-            title=f"✨ {amount:g} گرم طلای ۱۸ عیار = {format_price(gold_total)} تومان",
-            description=f"نرخ هر گرم: {format_price(data.get('gold_18k', 0))} تومان",
-            input_message_content=InputTextMessageContent(
-                message_text=f"✨ <b>{amount:g} گرم طلای ۱۸ عیار:</b> <code>{format_price(gold_total)}</code> تومان\n(نرخ هر گرم: {format_price(data.get('gold_18k', 0))} تومان)\n📢 {CHANNEL_ID}"
-            )
-        ),
-    ]
-    await query.answer(results, cache_time=30)
-
-
-@dp.message(Command("abshodeh"))
-async def cmd_abshodeh_calc(message: Message):
-    """محاسبه و تبدیل طلای آب‌شده عیار ۷۳۰ به عیار استاندارد ۷۵۰ (۱۸ عیار)"""
-    parts = message.text.split()
-    if len(parts) < 2:
-        await message.answer(
-            "⚖️ <b>تبدیل طلای آب‌شده (عیار ۷۳۰ به ۷۵۰)</b>\n\n"
-            "لطفاً وزن طلای آب‌شده (عیار ۷۳۰) را بعد از دستور وارد کنید.\n"
-            "مثال برای ۱۰ گرم طلای آب‌شده:\n"
-            "<code>/abshodeh 10</code>"
-        )
-        return
-
-    try:
-        weight_730 = float(parts[1])
-    except ValueError:
-        await message.answer("❌ لطفاً وزن را به صورت عدد انگلیسی وارد کنید (مثال: <code>/abshodeh 5.5</code>).")
-        return
-
-    data = await fetch_prices()
-    if not data or not data.get("gold_18k"):
-        await message.answer("❌ خطا در نرخ لحظه‌ای طلا.")
-        return
-
-    gold_18k = float(data["gold_18k"])  # نرخ عیار ۷۵۰
-
-    # فرمول تبدیل وزن عیار ۷۳۰ به معادل وزن عیار ۷۵۰
-    # وزن ۷۵۰ = (وزن ۷۳۰ * ۷۳۰) / ۷۵۰
-    equivalent_weight_750 = (weight_730 * 730) / 750
-    total_price = equivalent_weight_750 * gold_18k
-
-    await message.answer(
-        f"🔄 <b>محاسبه و تبدیل عیار طلا:</b>\n\n"
-        f"• وزن طلای آب‌شده (عیار ۷۳۰): <code>{weight_730}</code> گرم\n"
-        f"• معادل وزن با عیار ۷۵۰ (۱۸ عیار): <code>{round(equivalent_weight_750, 3)}</code> گرم\n"
-        f"• نرخ پایه عیار ۷۵۰: <code>{format_price(gold_18k)}</code> تومان\n\n"
-        f"💰 <b>ارزش کل معامله:</b> <code>{format_price(total_price)}</code> تومان"
-    )
-
-
-async def main():
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(update_channel_board, "interval", minutes=3)
-    scheduler.start()
-
-    await update_channel_board()
-    logging.info("🚀 بات مظنه با موفقیت روشن شد...")
-    await dp.start_polling(bot)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+                message_text=f"💶 <b>{amount:g} یورو:</b> <code>{format_price(eur_total)}</code> تومان\n
