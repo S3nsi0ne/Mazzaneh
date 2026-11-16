@@ -125,7 +125,7 @@ async def cmd_start(message: Message):
     await message.answer(
         "سلام! به بات <b>مظنه | نبض بازار</b> خوش آمدید 📊\n\n"
         "از منوی زیر می‌توانید به ابزارها، چارت‌های زنده و ماشین‌حساب‌های طلا و ارز دسترسی داشته باشید:",
-        reply_markup=get_main_menu() # <--- این قسمت حتماً باید اینجا باشد تا کیبورد ظاهر شود
+        reply_markup=get_main_menu()
     )
 
 
