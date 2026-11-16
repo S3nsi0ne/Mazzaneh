@@ -1,5 +1,7 @@
 import asyncio
+import json
 import logging
+import os
 import time
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
@@ -18,6 +20,10 @@ from src.formatter import build_channel_message, format_price
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+# ⚠️ آی‌دی عددی خودتان را جایگزین عدد زیر کنید
+ADMIN_ID = 414304393
+USERS_FILE = "users.json"
+
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
@@ -32,15 +38,38 @@ CHARTS = {
 }
 
 
-def get_main_menu() -> ReplyKeyboardMarkup:
-    """منوی کیبورد ثابت در پی‌وی ربات"""
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📊 تابلو لحظه‌ای بازار"), KeyboardButton(text="📈 دریافت چارت‌های زنده")],
-            [KeyboardButton(text="🧮 ماشین‌حساب خرید طلا"), KeyboardButton(text="🔄 تبدیل عیار آب‌شده (۷۳۰ به ۷۵۰)")]
-        ],
-        resize_keyboard=True
-    )
+# --- مدیریت دیتابیس سبک کاربران ---
+def load_users() -> dict:
+    if not os.path.exists(USERS_FILE):
+        return {}
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_user(user):
+    users = load_users()
+    uid = str(user.id)
+    users[uid] = {
+        "name": user.full_name,
+        "username": f"@{user.username}" if user.username else "ندارد",
+    }
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
+
+
+def get_main_menu(user_id: int) -> ReplyKeyboardMarkup:
+    """منوی کیبورد ثابت در پی‌وی (با دکمه اختصاصی برای ادمین)"""
+    keyboard = [
+        [KeyboardButton(text="📊 تابلو لحظه‌ای بازار"), KeyboardButton(text="📈 دریافت چارت‌های زنده")],
+        [KeyboardButton(text="🧮 ماشین‌حساب خرید طلا"), KeyboardButton(text="🔄 تبدیل عیار آب‌شده (۷۳۰ به ۷۵۰)")]
+    ]
+    if user_id == ADMIN_ID:
+        keyboard.append([KeyboardButton(text="👥 آمار کاربران (پنل ادمین)")])
+
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
 def get_charts_keyboard() -> InlineKeyboardMarkup:
@@ -120,16 +149,39 @@ async def update_channel_board(force_new: bool = False):
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
+    save_user(message.from_user)
     await message.answer(
         "سلام! به بات <b>مظنه | نبض بازار</b> خوش آمدید 📊\n\n"
         "از منوی زیر می‌توانید به ابزارها، چارت‌های زنده و ماشین‌حساب‌های طلا و ارز دسترسی داشته باشید:",
-        reply_markup=get_main_menu()
+        reply_markup=get_main_menu(message.from_user.id)
     )
+
+
+@dp.message(F.text == "👥 آمار کاربران (پنل ادمین)")
+@dp.message(Command("users"))
+async def handle_admin_users(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    users = load_users()
+    total = len(users)
+    if total == 0:
+        await message.answer("هنوز هیچ کاربری ربات را استارت نکرده است.")
+        return
+
+    lines = [f"👥 <b>تعداد کل کاربران ثبت‌شده:</b> {total} نفر\n"]
+    # نمایش ۳۰ کاربر آخر برای جلوگیری از طولانی شدن بیش از حد پیام
+    recent_users = list(users.items())[-30:]
+    for idx, (uid, info) in enumerate(recent_users, 1):
+        lines.append(f"{idx}. {info['name']} | {info['username']} (<code>{uid}</code>)")
+
+    await message.answer("\n".join(lines))
 
 
 @dp.message(F.text == "📊 تابلو لحظه‌ای بازار")
 @dp.message(Command("price"))
 async def handle_price(message: Message):
+    save_user(message.from_user)
     wait_msg = await message.answer("⏳ در حال دریافت آخرین نرخ‌های بازار...")
     data = await fetch_prices()
     if data:
@@ -141,6 +193,7 @@ async def handle_price(message: Message):
 
 @dp.message(F.text == "📈 دریافت چارت‌های زنده")
 async def handle_charts_menu(message: Message):
+    save_user(message.from_user)
     await message.answer(
         "📈 لطفاً چارت مورد نظر خود را انتخاب کنید تا تصویر آن برایتان ارسال شود:",
         reply_markup=get_charts_keyboard()
@@ -149,6 +202,7 @@ async def handle_charts_menu(message: Message):
 
 @dp.message(F.text == "🧮 ماشین‌حساب خرید طلا")
 async def handle_gold_help(message: Message):
+    save_user(message.from_user)
     await message.answer(
         "⚖️ <b>ماشین‌حساب خرید طلا</b>\n\n"
         "برای محاسبه قیمت نهایی خرید طلا، وزن و درصد اجرت/سود را به این شکل بفرستید:\n\n"
@@ -159,6 +213,7 @@ async def handle_gold_help(message: Message):
 
 @dp.message(F.text == "🔄 تبدیل عیار آب‌شده (۷۳۰ به ۷۵۰)")
 async def handle_abshodeh_help(message: Message):
+    save_user(message.from_user)
     await message.answer(
         "🔄 <b>مبدل طلای آب‌شده (عیار ۷۳۰ به ۷۵۰)</b>\n\n"
         "برای تبدیل وزن طلای آب‌شده به عیار استاندارد ۱۸ عیار، وزن را به این شکل بفرستید:\n\n"
@@ -169,13 +224,15 @@ async def handle_abshodeh_help(message: Message):
 
 @dp.message(Command("repost"))
 async def cmd_repost(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
     await update_channel_board(force_new=True)
     await message.answer("✅ تابلو جدید مجدداً در کانال ارسال و سنجاق شد!")
 
 
 @dp.message(Command("gold"))
 async def cmd_gold_calc(message: Message):
-    """ماشین حساب طلا: /gold [وزن به گرم] [اجرت کل به درصد]"""
+    save_user(message.from_user)
     parts = message.text.split()
     if len(parts) < 2:
         await message.answer("❌ فرمت اشتباه! مثال صحیح:\n<code>/gold 10 14</code>")
@@ -209,7 +266,7 @@ async def cmd_gold_calc(message: Message):
 
 @dp.message(Command("abshodeh"))
 async def cmd_abshodeh_calc(message: Message):
-    """تبدیل طلای آب‌شده ۷۳۰ به ۷۵۰"""
+    save_user(message.from_user)
     parts = message.text.split()
     if len(parts) < 2:
         await message.answer("❌ فرمت اشتباه! مثال صحیح:\n<code>/abshodeh 10</code>")
@@ -241,6 +298,7 @@ async def cmd_abshodeh_calc(message: Message):
 
 @dp.callback_query(F.data.startswith("pv_chart_"))
 async def cb_send_pv_chart(callback: CallbackQuery):
+    save_user(callback.from_user)
     chart_key = callback.data.replace("pv_", "")
     chart_info = CHARTS.get(chart_key)
     if not chart_info:
