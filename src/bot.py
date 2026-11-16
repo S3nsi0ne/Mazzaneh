@@ -23,26 +23,21 @@ dp = Dispatcher()
 live_message_id: int | None = None
 last_sent_text: str = ""
 
-# لینک نمودارهای آماده در مخزن نبض
-CHARTS = {
-    "chart_usd": ("نمودار تغییرات دلار آزاد 💵", "https://raw.githubusercontent.com/itsyebekhe/nabz/main/usd_chart.png"),
-    "chart_eur": ("نمودار تغییرات یورو 💶", "https://raw.githubusercontent.com/itsyebekhe/nabz/main/eur_chart.png"),
-    "chart_gold": ("نمودار طلای ۱۸ عیار ✨",
-                   "https://raw.githubusercontent.com/itsyebekhe/nabz/main/gold_18k_chart.png"),
-    "chart_coin": ("نمودار سکه امامی 🪙", "https://raw.githubusercontent.com/itsyebekhe/nabz/main/coin_emami_chart.png"),
-}
-
 
 def get_price_keyboard() -> InlineKeyboardMarkup:
     """ساخت دکمه‌های شیشه‌ای زیر پیام قیمت با لینک مستقیم به تصاویر چارت‌ها"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📈 چارت دلار", url="https://raw.githubusercontent.com/itsyebekhe/nabz/main/usd_chart.png"),
-            InlineKeyboardButton(text="📈 چارت طلا ۱۸", url="https://raw.githubusercontent.com/itsyebekhe/nabz/main/gold_18k_chart.png"),
+            InlineKeyboardButton(text="📈 چارت دلار",
+                                 url="https://raw.githubusercontent.com/itsyebekhe/nabz/main/usd_chart.png"),
+            InlineKeyboardButton(text="📈 چارت طلا ۱۸",
+                                 url="https://raw.githubusercontent.com/itsyebekhe/nabz/main/gold_18k_chart.png"),
         ],
         [
-            InlineKeyboardButton(text="📈 چارت سکه", url="https://raw.githubusercontent.com/itsyebekhe/nabz/main/coin_emami_chart.png"),
-            InlineKeyboardButton(text="📈 چارت یورو", url="https://raw.githubusercontent.com/itsyebekhe/nabz/main/eur_chart.png"),
+            InlineKeyboardButton(text="📈 چارت سکه",
+                                 url="https://raw.githubusercontent.com/itsyebekhe/nabz/main/coin_emami_chart.png"),
+            InlineKeyboardButton(text="📈 چارت یورو",
+                                 url="https://raw.githubusercontent.com/itsyebekhe/nabz/main/eur_chart.png"),
         ],
         [
             InlineKeyboardButton(text="🔄 بروزرسانی لحظه‌ای", callback_data="refresh_price")
@@ -104,30 +99,13 @@ async def update_channel_board(force_new: bool = False):
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
-    # تفکیک دقیق پارامترهای ارسالی به همراه دستور استارت
-    text_parts = message.text.split(maxsplit=1)
-
-    if len(text_parts) > 1:
-        param = text_parts[1].strip()
-        if param.startswith("chart_"):
-            chart_info = CHARTS.get(param)
-            if chart_info:
-                title, url = chart_info
-                fresh_url = f"{url}?t={int(time.time())}"
-                await message.answer_photo(
-                    photo=fresh_url,
-                    caption=f"📊 <b>{title}</b>\n\n✅ نمودار درخواستی شما تقدیم به شما.\n📢 {CHANNEL_ID}"
-                )
-                return
-
-    # حالت عادی دستور استارت
     await message.answer(
         "سلام! به بات <b>مظنه | نبض بازار</b> خوش آمدید 📊\n\n"
         "🔹 <b>دستورات کاربردی:</b>\n"
         "• /price — دریافت تابلو لحظه‌ای ارز، طلا و حباب سکه\n"
         "• /gold <code>[وزن] [درصد اجرت]</code> — ماشین‌حساب خرید طلا (مثال: <code>/gold 4.5 14</code>)\n"
         "• /repost — ارسال و پین مجدد تابلو در کانال\n\n"
-        "💡 <i>برای دریافت چارت‌ها، کافی است از داخل کانال روی دکمه‌های مربوطه کلیک کنید!</i>"
+        "💡 <i>برای دیدن چارت‌ها، کافی است از داخل کانال روی دکمه‌های مربوطه کلیک کنید!</i>"
     )
 
 
@@ -232,4 +210,30 @@ async def inline_calculator(query: InlineQuery):
             title=f"💶 {amount:g} یورو = {format_price(eur_total)} تومان",
             description=f"نرخ واحد: {format_price(data.get('eur', 0))} تومان",
             input_message_content=InputTextMessageContent(
-                message_text=f"💶 <b>{amount:g} یورو:</b> <code>{format_price(eur_total)}</code> تومان\n
+                message_text=f"💶 <b>{amount:g} یورو:</b> <code>{format_price(eur_total)}</code> تومان\n(نرخ واحد: {format_price(data.get('eur', 0))} تومان)\n📢 {CHANNEL_ID}"
+            )
+        ),
+        InlineQueryResultArticle(
+            id="gold_calc",
+            title=f"✨ {amount:g} گرم طلای ۱۸ عیار = {format_price(gold_total)} تومان",
+            description=f"نرخ هر گرم: {format_price(data.get('gold_18k', 0))} تومان",
+            input_message_content=InputTextMessageContent(
+                message_text=f"✨ <b>{amount:g} گرم طلای ۱۸ عیار:</b> <code>{format_price(gold_total)}</code> تومان\n(نرخ هر گرم: {format_price(data.get('gold_18k', 0))} تومان)\n📢 {CHANNEL_ID}"
+            )
+        ),
+    ]
+    await query.answer(results, cache_time=30)
+
+
+async def main():
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(update_channel_board, "interval", minutes=3)
+    scheduler.start()
+
+    await update_channel_board()
+    logging.info("🚀 بات مظنه با موفقیت روشن شد...")
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
