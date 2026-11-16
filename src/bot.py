@@ -298,3 +298,23 @@ async def inline_calculator(query: InlineQuery):
             id="gold_calc",
             title=f"✨ {amount:g} گرم طلا ۱۸ = {format_price(gold_total)} تومان",
             description=f"نرخ هر گرم: {format_price(data.get('gold_18k', 0))} تومان",
+            input_message_content=InputTextMessageContent(
+                message_text=f"✨ <b>{amount:g} گرم طلای ۱۸ عیار:</b> <code>{format_price(gold_total)}</code> تومان\n📢 {CHANNEL_ID}"
+            )
+        ),
+    ]
+    await query.answer(results, cache_time=30)
+
+
+async def main():
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(update_channel_board, "interval", minutes=3)
+    scheduler.start()
+
+    await update_channel_board()
+    logging.info("🚀 بات مظنه با موفقیت روشن شد...")
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
