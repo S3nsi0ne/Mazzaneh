@@ -34,17 +34,15 @@ CHARTS = {
 
 
 def get_price_keyboard() -> InlineKeyboardMarkup:
-    """ساخت دکمه‌های شیشه‌ای زیر پیام قیمت با لینک مستقیم به پی‌وی بات"""
-    bot_username = "MazzanehBot"  # <--- نام کاربری بات خود را اینجا جایگزین کنید (بدون @)
-
+    """ساخت دکمه‌های شیشه‌ای زیر پیام قیمت با لینک مستقیم به تصاویر چارت‌ها"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📈 چارت دلار", url=f"https://t.me/{bot_username}?start=chart_usd"),
-            InlineKeyboardButton(text="📈 چارت طلا ۱۸", url=f"https://t.me/{bot_username}?start=chart_gold"),
+            InlineKeyboardButton(text="📈 چارت دلار", url="https://raw.githubusercontent.com/itsyebekhe/nabz/main/usd_chart.png"),
+            InlineKeyboardButton(text="📈 چارت طلا ۱۸", url="https://raw.githubusercontent.com/itsyebekhe/nabz/main/gold_18k_chart.png"),
         ],
         [
-            InlineKeyboardButton(text="📈 چارت سکه", url=f"https://t.me/{bot_username}?start=chart_coin"),
-            InlineKeyboardButton(text="📈 چارت یورو", url=f"https://t.me/{bot_username}?start=chart_eur"),
+            InlineKeyboardButton(text="📈 چارت سکه", url="https://raw.githubusercontent.com/itsyebekhe/nabz/main/coin_emami_chart.png"),
+            InlineKeyboardButton(text="📈 چارت یورو", url="https://raw.githubusercontent.com/itsyebekhe/nabz/main/eur_chart.png"),
         ],
         [
             InlineKeyboardButton(text="🔄 بروزرسانی لحظه‌ای", callback_data="refresh_price")
