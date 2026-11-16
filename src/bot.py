@@ -7,7 +7,6 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
-    ReplyKeyboardMarkup, KeyboardButton,
     InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 )
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -34,34 +33,17 @@ CHARTS = {
 }
 
 
-# منوی کیبورد ثابت در پی‌وی ربات
-def get_main_menu() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📊 تابلو لحظه‌ای بازار"), KeyboardButton(text="📈 دریافت چارت‌های زنده")],
-            [KeyboardButton(text="🧮 ماشین‌حساب خرید طلا"), KeyboardButton(text="🔄 تبدیل عیار آب‌شده (۷۳۰ به ۷۵۰)")]
-        ],
-        resize_keyboard=True
-    )
-
-
-def get_charts_keyboard() -> InlineKeyboardMarkup:
-    """دکمه‌های شیشه‌ای چارت‌ها برای ارسال مستقیم در پی‌وی"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="💵 چارت دلار", callback_data="pv_chart_usd"),
-            InlineKeyboardButton(text="✨ چارت طلای ۱۸", callback_data="pv_chart_gold"),
-        ],
-        [
-            InlineKeyboardButton(text="🪙 چارت سکه امامی", callback_data="pv_chart_coin"),
-            InlineKeyboardButton(text="💶 چارت یورو", callback_data="pv_chart_eur"),
-        ]
-    ])
-
-
 def get_channel_keyboard() -> InlineKeyboardMarkup:
-    """دکمه‌های زیر پیام کانال (بروزرسانی)"""
+    """دکمه‌های زیر پیام کانال شامل بروزرسانی و دریافت چارت‌ها"""
     return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📈 چارت دلار", callback_data="chart_usd"),
+            InlineKeyboardButton(text="📈 چارت طلا", callback_data="chart_gold"),
+        ],
+        [
+            InlineKeyboardButton(text="📈 چارت سکه", callback_data="chart_coin"),
+            InlineKeyboardButton(text="📈 چارت یورو", callback_data="chart_eur"),
+        ],
         [
             InlineKeyboardButton(text="🔄 بروزرسانی لحظه‌ای", callback_data="refresh_price")
         ]
@@ -124,14 +106,17 @@ async def update_channel_board(force_new: bool = False):
 async def cmd_start(message: Message):
     await message.answer(
         "سلام! به بات <b>مظنه | نبض بازار</b> خوش آمدید 📊\n\n"
-        "از منوی زیر می‌توانید به ابزارها، چارت‌های زنده و ماشین‌حساب‌های طلا و ارز دسترسی داشته باشید:",
-        reply_markup=get_main_menu()
+        "🔹 <b>دستورات کاربردی:</b>\n"
+        "• /price — دریافت تابلو لحظه‌ای ارز و طلا\n"
+        "• /gold [وزن] [اجرت] — ماشین‌حساب خرید طلا (مثال: <code>/gold 10 14</code>)\n"
+        "• /abshodeh [وزن] — تبدیل عیار آب‌شده ۷۳۰ به ۷۵۰ (مثال: <code>/abshodeh 10</code>)\n"
+        "• /repost — ارسال و پین مجدد تابلو در کانال\n\n"
+        "💡 <i>برای دیدن چارت‌ها می‌توانید از دکمه‌های شیشه‌ای داخل کانال استفاده کنید!</i>"
     )
 
 
-@dp.message(F.text == "📊 تابلو لحظه‌ای بازار")
 @dp.message(Command("price"))
-async def handle_price(message: Message):
+async def cmd_price(message: Message):
     wait_msg = await message.answer("⏳ در حال دریافت آخرین نرخ‌های بازار...")
     data = await fetch_prices()
     if data:
@@ -139,32 +124,6 @@ async def handle_price(message: Message):
         await wait_msg.edit_text(text, reply_markup=get_channel_keyboard())
     else:
         await wait_msg.edit_text("❌ خطا در دریافت اطلاعات از سرور.")
-
-
-@dp.message(F.text == "📈 دریافت چارت‌های زنده")
-async def handle_charts_menu(message: Message):
-    await message.answer("📈 لطفاً چارت مورد نظر خود را انتخاب کنید تا عکس آن برایتان ارسال شود:",
-                         reply_markup=get_charts_keyboard())
-
-
-@dp.message(F.text == "🧮 ماشین‌حساب خرید طلا")
-async def handle_gold_help(message: Message):
-    await message.answer(
-        "⚖️ <b>ماشین‌حساب خرید طلا</b>\n\n"
-        "برای محاسبه قیمت نهایی خرید طلا، وزن و درصد اجرت/سود را به این شکل بفرستید:\n\n"
-        "مثال: <code>/gold 10 14</code>\n"
-        "(یعنی ۱۰ گرم طلا با ۱۴ درصد اجرت و سود)"
-    )
-
-
-@dp.message(F.text == "🔄 تبدیل عیار آب‌شده (۷۳۰ به ۷۵۰)")
-async def handle_abshodeh_help(message: Message):
-    await message.answer(
-        "🔄 <b>مبدل طلای آب‌شده (عیار ۷۳۰ به ۷۵۰)</b>\n\n"
-        "برای تبدیل وزن طلای آب‌شده به عیار استاندارد ۱۸ عیار، وزن را به این شکل بفرستید:\n\n"
-        "مثال: <code>/abshodeh 15.5</code>\n"
-        "(یعنی ۱۵.۵ گرم طلای آب‌شده عیار ۷۳۰)"
-    )
 
 
 @dp.message(Command("repost"))
@@ -175,7 +134,6 @@ async def cmd_repost(message: Message):
 
 @dp.message(Command("gold"))
 async def cmd_gold_calc(message: Message):
-    """ماشین حساب طلا: /gold [وزن به گرم] [اجرت کل به درصد]"""
     parts = message.text.split()
     if len(parts) < 2:
         await message.answer("❌ فرمت اشتباه! مثال صحیح:\n<code>/gold 10 14</code>")
@@ -209,7 +167,6 @@ async def cmd_gold_calc(message: Message):
 
 @dp.message(Command("abshodeh"))
 async def cmd_abshodeh_calc(message: Message):
-    """تبدیل طلای آب‌شده ۷۳۰ به ۷۵۰"""
     parts = message.text.split()
     if len(parts) < 2:
         await message.answer("❌ فرمت اشتباه! مثال صحیح:\n<code>/abshodeh 10</code>")
@@ -239,20 +196,27 @@ async def cmd_abshodeh_calc(message: Message):
     )
 
 
-@dp.callback_query(F.data.startswith("pv_chart_"))
-async def cb_send_pv_chart(callback: CallbackQuery):
-    chart_key = callback.data.replace("pv_", "")
-    chart_info = CHARTS.get(chart_key)
+@dp.callback_query(F.data.startswith("chart_"))
+async def cb_send_chart(callback: CallbackQuery):
+    """ارسال عکس چارت به پی‌وی کاربر به محض کلیک روی دکمه شیشه‌ای کانال"""
+    chart_info = CHARTS.get(callback.data)
     if not chart_info:
+        await callback.answer("چارت یافت نشد!", show_alert=True)
         return
+
     title, url = chart_info
+    user_id = callback.from_user.id
     fresh_url = f"{url}?t={int(time.time())}"
 
-    await callback.message.answer_photo(
-        photo=fresh_url,
-        caption=f"📊 <b>{title}</b>\n\n✅ نمودار لحظه‌ای درخواستی شما."
-    )
-    await callback.answer("نمودار ارسال شد ✅")
+    try:
+        await bot.send_photo(
+            chat_id=user_id,
+            photo=fresh_url,
+            caption=f"📊 <b>{title}</b>\n\n✅ نمودار درخواستی شما تقدیم به شما.\n📢 {CHANNEL_ID}"
+        )
+        await callback.answer("✅ نمودار به پی‌وی شما ارسال شد!", show_alert=False)
+    except Exception:
+        await callback.answer("❌ لطفاً ابتدا در پی‌وی به بات دستور /start را بفرستید!", show_alert=True)
 
 
 @dp.callback_query(F.data == "refresh_price")
@@ -282,7 +246,6 @@ async def inline_calculator(query: InlineQuery):
         return
 
     usd_total = amount * float(data.get("usd", 0))
-    eur_total = amount * float(data.get("eur", 0))
     gold_total = amount * float(data.get("gold_18k", 0))
 
     results = [
