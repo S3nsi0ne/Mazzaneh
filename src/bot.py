@@ -190,9 +190,23 @@ async def cb_send_chart(callback: CallbackQuery):
     if not chart_info:
         return
     title, url = chart_info
-    await callback.answer("در حال دریافت نمودار...")
+
+    # ارسال به پی‌وی کاربر
+    user_id = callback.from_user.id
     fresh_url = f"{url}?t={int(time.time())}"
-    await callback.message.answer_photo(photo=fresh_url, caption=f"📊 <b>{title}</b>\n📢 {CHANNEL_ID}")
+
+    try:
+        await bot.send_photo(
+            chat_id=user_id,
+            photo=fresh_url,
+            caption=f"📊 <b>{title}</b>\n\n✅ نمودار درخواستی شما تقدیم به شما."
+        )
+        await callback.answer("✅ نمودار به پی‌وی شما ارسال شد!", show_alert=False)
+    except Exception:
+        # اگر کاربر هنوز استارت را نزد یا ربات را بلاک کرده بود
+        await callback.answer(
+            "❌ لطفاً ابتدا در پی‌وی به بات دستور /start را بفرستید تا بتوانیم نمودار را برایتان ارسال کنیم.",
+            show_alert=True)
 
 
 @dp.inline_query()
@@ -239,6 +253,46 @@ async def inline_calculator(query: InlineQuery):
         ),
     ]
     await query.answer(results, cache_time=30)
+
+
+@dp.message(Command("abshodeh"))
+async def cmd_abshodeh_calc(message: Message):
+    """محاسبه و تبدیل طلای آب‌شده عیار ۷۳۰ به عیار استاندارد ۷۵۰ (۱۸ عیار)"""
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.answer(
+            "⚖️ <b>تبدیل طلای آب‌شده (عیار ۷۳۰ به ۷۵۰)</b>\n\n"
+            "لطفاً وزن طلای آب‌شده (عیار ۷۳۰) را بعد از دستور وارد کنید.\n"
+            "مثال برای ۱۰ گرم طلای آب‌شده:\n"
+            "<code>/abshodeh 10</code>"
+        )
+        return
+
+    try:
+        weight_730 = float(parts[1])
+    except ValueError:
+        await message.answer("❌ لطفاً وزن را به صورت عدد انگلیسی وارد کنید (مثال: <code>/abshodeh 5.5</code>).")
+        return
+
+    data = await fetch_prices()
+    if not data or not data.get("gold_18k"):
+        await message.answer("❌ خطا در نرخ لحظه‌ای طلا.")
+        return
+
+    gold_18k = float(data["gold_18k"])  # نرخ عیار ۷۵۰
+
+    # فرمول تبدیل وزن عیار ۷۳۰ به معادل وزن عیار ۷۵۰
+    # وزن ۷۵۰ = (وزن ۷۳۰ * ۷۳۰) / ۷۵۰
+    equivalent_weight_750 = (weight_730 * 730) / 750
+    total_price = equivalent_weight_750 * gold_18k
+
+    await message.answer(
+        f"🔄 <b>محاسبه و تبدیل عیار طلا:</b>\n\n"
+        f"• وزن طلای آب‌شده (عیار ۷۳۰): <code>{weight_730}</code> گرم\n"
+        f"• معادل وزن با عیار ۷۵۰ (۱۸ عیار): <code>{round(equivalent_weight_750, 3)}</code> گرم\n"
+        f"• نرخ پایه عیار ۷۵۰: <code>{format_price(gold_18k)}</code> تومان\n\n"
+        f"💰 <b>ارزش کل معامله:</b> <code>{format_price(total_price)}</code> تومان"
+    )
 
 
 async def main():
