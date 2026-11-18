@@ -42,7 +42,8 @@ def build_channel_message(data: dict, channel_id: str = "@Mazzaneh") -> str:
     coin_quarter = data.get("coin_quarter", 0)
 
     date_shamsi = data.get("date_shamsi_full", data.get("date_shamsi", ""))
-    updated_time = data.get("updated_at", "").split(" ")[-1] if data.get("updated_at") else ""
+    updated_raw = data.get("updated_at")
+    updated_time = str(updated_raw).split(" ")[-1] if updated_raw else ""
 
     # محاسبه حباب سکه امامی
     bubble_tomans, bubble_pct = calculate_coin_bubble(

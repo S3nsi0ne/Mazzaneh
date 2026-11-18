@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json
 import logging
 import os
@@ -7,6 +8,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton,
@@ -21,14 +23,33 @@ from src.formatter import build_channel_message, format_price
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # ⚠️ آی‌دی عددی خودتان را جایگزین عدد زیر کنید
-ADMIN_ID = 414304393
+ADMIN_ID = int(os.getenv("ADMIN_ID", "414304393"))
 USERS_FILE = "users.json"
+STATE_FILE = "channel_state.json"
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 live_message_id: int | None = None
 last_sent_text: str = ""
+
+_users_lock = asyncio.Lock()
+_channel_lock = asyncio.Lock()
+
+_PRICE_CACHE_TTL = 20.0
+_price_cache = {"data": None, "ts": 0.0}
+
+
+async def get_cached_prices():
+    now = time.monotonic()
+    cached = _price_cache["data"]
+    if cached is not None and (now - _price_cache["ts"]) < _PRICE_CACHE_TTL:
+        return cached
+    data = await fetch_prices()
+    if data:
+        _price_cache["data"] = data
+        _price_cache["ts"] = now
+    return data
 
 CHARTS = {
     "chart_usd": ("نمودار تغییرات دلار آزاد 💵", "https://raw.githubusercontent.com/itsyebekhe/nabz/main/usd_chart.png"),
@@ -49,15 +70,50 @@ def load_users() -> dict:
         return {}
 
 
-def save_user(user):
-    users = load_users()
-    uid = str(user.id)
-    users[uid] = {
-        "name": user.full_name,
-        "username": f"@{user.username}" if user.username else "ندارد",
-    }
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
+async def save_user(user):
+    async with _users_lock:
+        users = load_users()
+        uid = str(user.id)
+        users[uid] = {
+            "name": user.full_name,
+            "username": f"@{user.username}" if user.username else "ندارد",
+        }
+        tmp = USERS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(users, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, USERS_FILE)
+
+
+def _load_state():
+    global live_message_id, last_sent_text
+    if not os.path.exists(STATE_FILE):
+        return
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        live_message_id = data.get("live_message_id")
+        last_sent_text = data.get("last_sent_text", "") or ""
+    except Exception as e:
+        logging.warning(f"state load failed: {e}")
+
+
+def _save_state():
+    global live_message_id, last_sent_text
+    try:
+        tmp = STATE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(
+                {"live_message_id": live_message_id, "last_sent_text": last_sent_text},
+                f,
+                ensure_ascii=False,
+            )
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, STATE_FILE)
+    except Exception as e:
+        logging.warning(f"state save failed: {e}")
 
 
 def get_main_menu(user_id: int) -> ReplyKeyboardMarkup:
@@ -95,13 +151,19 @@ def get_channel_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-async def update_channel_board(force_new: bool = False):
-    """دریافت قیمت جدید و بروزرسانی پیام سنجاق‌شده در کانال"""
+async def _update_channel_board_locked(force_new: bool = False, _retry: int = 0):
+    """Inner implementation; caller must hold _channel_lock."""
     global live_message_id, last_sent_text
 
     if force_new:
+        if live_message_id is not None:
+            try:
+                await bot.unpin_chat_message(chat_id=CHANNEL_ID, message_id=live_message_id)
+            except Exception as unpin_err:
+                logging.warning(f"پیام قبلی unpin نشد: {unpin_err}")
         live_message_id = None
         last_sent_text = ""
+        _save_state()
 
     data = await fetch_prices()
     if not data:
@@ -136,20 +198,29 @@ async def update_channel_board(force_new: bool = False):
             logging.info("🔄 تابلو زنده کانال بروزرسانی شد.")
 
         last_sent_text = new_text
+        _save_state()
     except Exception as e:
         error_msg = str(e).lower()
         if "message to edit not found" in error_msg or "message_id_invalid" in error_msg:
             logging.warning("⚠️ پیام قبلی در کانال پیدا نشد. در حال ارسال پیام جدید...")
             live_message_id = None
             last_sent_text = ""
-            await update_channel_board(force_new=True)
+            _save_state()
+            if _retry < 1:
+                await _update_channel_board_locked(force_new=True, _retry=_retry + 1)
         else:
             logging.error(f"❌ خطا در ارسال/ویرایش پیام کانال: {e}")
 
 
+async def update_channel_board(force_new: bool = False):
+    """دریافت قیمت جدید و بروزرسانی پیام سنجاق‌شده در کانال"""
+    async with _channel_lock:
+        await _update_channel_board_locked(force_new=force_new)
+
+
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
-    save_user(message.from_user)
+    await save_user(message.from_user)
     await message.answer(
         "سلام! به بات <b>مظنه | نبض بازار</b> خوش آمدید 📊\n\n"
         "از منوی زیر می‌توانید به ابزارها، چارت‌های زنده و ماشین‌حساب‌های طلا و ارز دسترسی داشته باشید:",
@@ -173,7 +244,14 @@ async def handle_admin_users(message: Message):
     # نمایش ۳۰ کاربر آخر برای جلوگیری از طولانی شدن بیش از حد پیام
     recent_users = list(users.items())[-30:]
     for idx, (uid, info) in enumerate(recent_users, 1):
-        lines.append(f"{idx}. {info['name']} | {info['username']} (<code>{uid}</code>)")
+        line = (
+            f"{idx}. {html.escape(str(info.get('name', '')))} | "
+            f"{html.escape(str(info.get('username', '')))} (<code>{html.escape(str(uid))}</code>)"
+        )
+        if len("\n".join(lines + [line])) > 3900:
+            lines.append("… (truncated)")
+            break
+        lines.append(line)
 
     await message.answer("\n".join(lines))
 
@@ -181,19 +259,25 @@ async def handle_admin_users(message: Message):
 @dp.message(F.text == "📊 تابلو لحظه‌ای بازار")
 @dp.message(Command("price"))
 async def handle_price(message: Message):
-    save_user(message.from_user)
+    await save_user(message.from_user)
     wait_msg = await message.answer("⏳ در حال دریافت آخرین نرخ‌های بازار...")
     data = await fetch_prices()
     if data:
         text = build_channel_message(data, channel_id=CHANNEL_ID)
-        await wait_msg.edit_text(text, reply_markup=get_channel_keyboard())
+        try:
+            await wait_msg.edit_text(text, reply_markup=get_channel_keyboard())
+        except Exception as e:
+            logging.warning(f"ویرایش پیام خطا: {e}")
     else:
-        await wait_msg.edit_text("❌ خطا در دریافت اطلاعات از سرور.")
+        try:
+            await wait_msg.edit_text("❌ خطا در دریافت اطلاعات از سرور.")
+        except Exception as e:
+            logging.warning(f"ویرایش پیام خطا: {e}")
 
 
 @dp.message(F.text == "📈 دریافت چارت‌های زنده")
 async def handle_charts_menu(message: Message):
-    save_user(message.from_user)
+    await save_user(message.from_user)
     await message.answer(
         "📈 لطفاً چارت مورد نظر خود را انتخاب کنید تا تصویر آن برایتان ارسال شود:",
         reply_markup=get_charts_keyboard()
@@ -202,7 +286,7 @@ async def handle_charts_menu(message: Message):
 
 @dp.message(F.text == "🧮 ماشین‌حساب خرید طلا")
 async def handle_gold_help(message: Message):
-    save_user(message.from_user)
+    await save_user(message.from_user)
     await message.answer(
         "⚖️ <b>ماشین‌حساب خرید طلا</b>\n\n"
         "برای محاسبه قیمت نهایی خرید طلا، وزن و درصد اجرت/سود را به این شکل بفرستید:\n\n"
@@ -213,7 +297,7 @@ async def handle_gold_help(message: Message):
 
 @dp.message(F.text == "🔄 تبدیل عیار آب‌شده (۷۳۰ به ۷۵۰)")
 async def handle_abshodeh_help(message: Message):
-    save_user(message.from_user)
+    await save_user(message.from_user)
     await message.answer(
         "🔄 <b>مبدل طلای آب‌شده (عیار ۷۳۰ به ۷۵۰)</b>\n\n"
         "برای تبدیل وزن طلای آب‌شده به عیار استاندارد ۱۸ عیار، وزن را به این شکل بفرستید:\n\n"
@@ -232,7 +316,7 @@ async def cmd_repost(message: Message):
 
 @dp.message(Command("gold"))
 async def cmd_gold_calc(message: Message):
-    save_user(message.from_user)
+    await save_user(message.from_user)
     parts = message.text.split()
     if len(parts) < 2:
         await message.answer("❌ فرمت اشتباه! مثال صحیح:\n<code>/gold 10 14</code>")
@@ -250,7 +334,11 @@ async def cmd_gold_calc(message: Message):
         await message.answer("❌ خطا در دریافت نرخ لحظه‌ای طلا.")
         return
 
-    gold_18k = float(data["gold_18k"])
+    try:
+        gold_18k = float(data["gold_18k"])
+    except (TypeError, ValueError):
+        await message.answer("❌ خطا در دریافت نرخ لحظه‌ای طلا.")
+        return
     raw_price = weight * gold_18k
     final_price = raw_price * (1 + (fee_pct / 100))
 
@@ -266,7 +354,7 @@ async def cmd_gold_calc(message: Message):
 
 @dp.message(Command("abshodeh"))
 async def cmd_abshodeh_calc(message: Message):
-    save_user(message.from_user)
+    await save_user(message.from_user)
     parts = message.text.split()
     if len(parts) < 2:
         await message.answer("❌ فرمت اشتباه! مثال صحیح:\n<code>/abshodeh 10</code>")
@@ -283,7 +371,11 @@ async def cmd_abshodeh_calc(message: Message):
         await message.answer("❌ خطا در نرخ لحظه‌ای طلا.")
         return
 
-    gold_18k = float(data["gold_18k"])
+    try:
+        gold_18k = float(data["gold_18k"])
+    except (TypeError, ValueError):
+        await message.answer("❌ خطا در نرخ لحظه‌ای طلا.")
+        return
     equivalent_weight_750 = (weight_730 * 730) / 750
     total_price = equivalent_weight_750 * gold_18k
 
@@ -298,7 +390,7 @@ async def cmd_abshodeh_calc(message: Message):
 
 @dp.callback_query(F.data.startswith("pv_chart_"))
 async def cb_send_pv_chart(callback: CallbackQuery):
-    save_user(callback.from_user)
+    await save_user(callback.from_user)
     chart_key = callback.data.replace("pv_", "")
     chart_info = CHARTS.get(chart_key)
     if not chart_info:
@@ -307,10 +399,15 @@ async def cb_send_pv_chart(callback: CallbackQuery):
     title, url = chart_info
     fresh_url = f"{url}?t={int(time.time())}"
 
-    await callback.message.answer_photo(
-        photo=fresh_url,
-        caption=f"📊 <b>{title}</b>\n\n✅ نمودار لحظه‌ای درخواستی شما."
-    )
+    try:
+        await callback.message.answer_photo(
+            photo=fresh_url,
+            caption=f"📊 <b>{title}</b>\n\n✅ نمودار لحظه‌ای درخواستی شما."
+        )
+    except Exception as e:
+        logging.error(f"ارسال چارت خطا: {e}")
+        await callback.answer("خطا در ارسال چارت!", show_alert=True)
+        return
     await callback.answer("نمودار ارسال شد ✅")
 
 
@@ -324,8 +421,15 @@ async def cb_refresh_price(callback: CallbackQuery):
     try:
         await callback.message.edit_text(new_text, reply_markup=get_channel_keyboard())
         await callback.answer("✅ قیمت‌ها بروزرسانی شد")
-    except Exception:
-        await callback.answer("قیمت‌ها تغییری نکرده است ✅")
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e).lower():
+            await callback.answer("قیمت‌ها تغییری نکرده است ✅")
+        else:
+            logging.error(f"ویرایش پیام خطا: {e}")
+            await callback.answer("خطا در بروزرسانی!", show_alert=True)
+    except Exception as e:
+        logging.error(f"ویرایش پیام خطا: {e}")
+        await callback.answer("خطا در بروزرسانی!", show_alert=True)
 
 
 @dp.inline_query()
@@ -336,12 +440,20 @@ async def inline_calculator(query: InlineQuery):
     except ValueError:
         return
 
-    data = await fetch_prices()
+    data = await get_cached_prices()
     if not data:
         return
 
-    usd_total = amount * float(data.get("usd", 0))
-    gold_total = amount * float(data.get("gold_18k", 0))
+    try:
+        usd_rate = float(data.get("usd", 0))
+        gold_rate = float(data.get("gold_18k", 0))
+    except (TypeError, ValueError):
+        return
+    if not (usd_rate and gold_rate):
+        return
+
+    usd_total = amount * usd_rate
+    gold_total = amount * gold_rate
 
     results = [
         InlineQueryResultArticle(
@@ -365,13 +477,18 @@ async def inline_calculator(query: InlineQuery):
 
 
 async def main():
+    _load_state()
+
     scheduler = AsyncIOScheduler()
     scheduler.add_job(update_channel_board, "interval", minutes=3)
     scheduler.start()
 
     await update_channel_board()
     logging.info("🚀 بات مظنه با موفقیت روشن شد...")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        scheduler.shutdown(wait=False)
 
 
 if __name__ == "__main__":

@@ -3,4 +3,9 @@ venv/
 __pycache__/
 .idea/
 .env
+users.json
+users.json.tmp
+channel_state.json
+channel_state.json.tmp
+*.tmp
 *.pyc
